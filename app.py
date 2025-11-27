@@ -243,6 +243,82 @@ plot_log_scale = st.sidebar.checkbox("Use Log-Log Scale", value=True)
 st.sidebar.markdown("---")
 run_btn = st.sidebar.button("Fetch & Reconstruct", type="primary", use_container_width=True)
 
+# Architecture Details Expander
+with st.sidebar.expander("Architecture & Model Details"):
+    st.markdown("""
+    **Bidirectional LSTM Architecture:**
+    - Processes temporal data in both forward and backward directions
+    - Captures long-term dependencies in light curve evolution
+    - He Normal initialization for stable gradient flow
+    
+    **Adaptive Scaling Logic:**
+    - **< 80 points**: Lightweight (2 layers, 32 units)
+    - **80-300 points**: Standard (3 layers, 64-32 units)
+    - **> 300 points**: Deep (4 layers, 128-64 units)
+    
+    **Training Strategy:**
+    - Optimizer: Adam with configurable learning rate
+    - Loss Function: Mean Squared Error (MSE)
+    - Input: Log-transformed time series (normalized)
+    - Output: Log-transformed flux predictions
+    
+    **Preprocessing Pipeline:**
+    1. Log10 transformation (handle power-law decay)
+    2. MinMax scaling to [0,1] range
+    3. Sequence reshaping for LSTM input
+    4. Inverse transform for physical units
+    
+    **Data Quality Filters:**
+    - Removes negative/zero flux values
+    - Filters early trigger noise (< 10s default)
+    - Sorts chronologically
+    - Handles QDP format variations
+    """)
+
+with st.sidebar.expander("About Swift-XRT Data"):
+    st.markdown("""
+    **Neil Gehrels Swift Observatory:**
+    - Launched: November 2004
+    - Primary Mission: Rapid GRB detection
+    - X-Ray Telescope (XRT): 0.2-10 keV range
+    - Typical response time: < 100 seconds
+    
+    **Data Source:**
+    - UK Swift Science Data Centre (UKSSDC)
+    - Automated light curve generation
+    - QDP format (Quick Data Plot)
+    - Updated within hours of observation
+    
+    **Flux Units:**
+    - erg/cm²/s (0.3-10 keV band)
+    - Logarithmic scale typical for GRBs
+    - Error bars include Poisson statistics
+    """)
+
+with st.sidebar.expander("GRB Classification Guide"):
+    st.markdown("""
+    **Long GRBs (> 2 seconds):**
+    - Associated with massive star collapse
+    - Strong afterglow emission
+    - Examples: GRB 130427A, GRB 080319B
+    
+    **Short GRBs (< 2 seconds):**
+    - Neutron star mergers
+    - Weaker afterglows
+    - Examples: GRB 050509B, GRB 090510
+    
+    **Ultra-Long GRBs (> 1000 seconds):**
+    - Exotic progenitors (blue supergiants?)
+    - Example: GRB 111209A
+    
+    **Key Observables:**
+    - Peak flux and fluence
+    - Temporal decay index
+    - Spectral hardness
+    - Redshift (distance)
+    """)
+
+
 # --- MAIN EXECUTION ---
 if run_btn:
     with st.spinner(f"Contacting Swift-XRT Repository for {selected_name.split('(')[0].strip()}..."):
@@ -280,8 +356,8 @@ if run_btn:
         model, epochs, batch = build_adaptive_model(len(ts), manual_config, use_dropout)
         
         # Apply epoch override if set
-        if st.session_state.get('custom_epochs'):
-            epochs = st.session_state['custom_epochs']
+        if custom_epochs is not None:
+            epochs = custom_epochs
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -307,33 +383,43 @@ if run_btn:
         predictions_scaled = model.predict(recon_seq, verbose=0)
         predictions_log = scaler_y.inverse_transform(predictions_scaled)
         
+        # Calculate residuals and statistics
+        train_predictions_scaled = model.predict(X_seq, verbose=0)
+        train_predictions_log = scaler_y.inverse_transform(train_predictions_scaled)
+        residuals = log_fluxes - train_predictions_log.flatten()
+        
+        # Convert back to linear scale for some analyses
+        recon_t = 10**recon_log_t.flatten()
+        recon_flux = 10**predictions_log.flatten()
+        
         # VISUALIZATION
         st.subheader(f"Temporal Reconstruction: {selected_name.split('(')[0].strip()}")
         
-        fig, ax = plt.subplots(figsize=(14, 7))
+        # PLOT 1: Main Light Curve
+        fig1, ax1 = plt.subplots(figsize=(14, 7))
         
-        ax.errorbar(log_ts, log_fluxes, yerr=flux_errs/(fluxes*np.log(10)), 
+        ax1.errorbar(log_ts, log_fluxes, yerr=flux_errs/(fluxes*np.log(10)), 
                    fmt='o', color='gray', alpha=0.4, markersize=5, 
                    label='Swift-XRT Observed Data', capsize=3)
         
-        ax.plot(recon_log_t, predictions_log, color='#FF4B4B', linewidth=3, 
+        ax1.plot(recon_log_t, predictions_log, color='#FF4B4B', linewidth=3, 
                label='BiLSTM Reconstruction', zorder=5)
         
         if show_confidence:
-            residuals = np.interp(log_ts, recon_log_t.flatten(), predictions_log.flatten()) - log_fluxes
             std_residual = np.std(residuals)
-            ax.fill_between(recon_log_t.flatten(), 
+            ax1.fill_between(recon_log_t.flatten(), 
                            predictions_log.flatten() - 2*std_residual,
                            predictions_log.flatten() + 2*std_residual,
                            color='#FF4B4B', alpha=0.2, label='95% Confidence Interval')
         
-        ax.set_xlabel("log(Time) [seconds]", fontsize=12, fontweight='bold')
-        ax.set_ylabel("log(Flux) [erg/cm²/s]", fontsize=12, fontweight='bold')
-        ax.set_title(f"X-ray Light Curve: {selected_name}", fontsize=14, fontweight='bold')
-        ax.legend(loc='best', framealpha=0.9)
-        ax.grid(True, alpha=0.3, linestyle='--')
+        ax1.set_xlabel("log(Time) [seconds]", fontsize=12, fontweight='bold')
+        ax1.set_ylabel("log(Flux) [erg/cm²/s]", fontsize=12, fontweight='bold')
+        ax1.set_title(f"X-ray Light Curve: {selected_name}", fontsize=14, fontweight='bold')
+        ax1.legend(loc='best', framealpha=0.9)
+        ax1.grid(True, alpha=0.3, linestyle='--')
         
-        st.pyplot(fig)
+        st.pyplot(fig1)
+        plt.close(fig1)
         
         # METRICS DASHBOARD
         st.markdown("### Performance Metrics")
@@ -344,32 +430,312 @@ if run_btn:
         col3.metric("Flux Range", f"10^{np.ptp(log_fluxes):.2f}")
         col4.metric("Time Span", f"{ts[-1]/ts[0]:.1f}x")
         
-        # TRAINING HISTORY
-        with st.expander("View Training History"):
-            fig_loss, ax_loss = plt.subplots(figsize=(10, 4))
-            ax_loss.plot(history.history['loss'], color='#0068C9', linewidth=2)
-            ax_loss.set_xlabel("Epoch")
-            ax_loss.set_ylabel("Loss (MSE)")
-            ax_loss.set_title("Training Loss Evolution")
-            ax_loss.grid(True, alpha=0.3)
-            st.pyplot(fig_loss)
+        # ADDITIONAL PLOTS
+        st.markdown("### Comprehensive Analysis")
         
-        # DATA EXPORT
-        st.markdown("### Export Reconstruction Data")
-        df_export = pd.DataFrame({
-            'log_time_seconds': recon_log_t.flatten(),
-            'time_seconds': 10**recon_log_t.flatten(),
-            'reconstructed_log_flux': predictions_log.flatten(),
-            'reconstructed_flux': 10**predictions_log.flatten()
-        })
+        # PLOT 2: Residual Analysis
+        fig2, (ax2a, ax2b) = plt.subplots(1, 2, figsize=(14, 5))
         
-        csv = df_export.to_csv(index=False)
-        st.download_button(
-            label="Download Reconstruction (CSV)",
-            data=csv,
-            file_name=f"{selected_name.split('(')[0].strip().replace(' ', '_')}_reconstruction.csv",
-            mime="text/csv"
-        )
+        # Residuals vs Time
+        ax2a.scatter(log_ts, residuals, color='#0068C9', alpha=0.6, s=50)
+        ax2a.axhline(y=0, color='red', linestyle='--', linewidth=2, label='Zero Residual')
+        ax2a.axhline(y=np.mean(residuals), color='orange', linestyle='--', linewidth=1.5, 
+                    label=f'Mean: {np.mean(residuals):.4f}')
+        ax2a.fill_between(log_ts, -2*np.std(residuals), 2*np.std(residuals), 
+                         alpha=0.2, color='gray', label='±2σ Band')
+        ax2a.set_xlabel("log(Time) [seconds]", fontweight='bold')
+        ax2a.set_ylabel("Residual [log(Flux)]", fontweight='bold')
+        ax2a.set_title("Residual Distribution Over Time", fontweight='bold')
+        ax2a.legend()
+        ax2a.grid(True, alpha=0.3)
+        
+        # Residual Histogram
+        ax2b.hist(residuals, bins=30, color='#0068C9', alpha=0.7, edgecolor='black')
+        ax2b.axvline(x=0, color='red', linestyle='--', linewidth=2)
+        ax2b.axvline(x=np.mean(residuals), color='orange', linestyle='--', linewidth=1.5)
+        ax2b.set_xlabel("Residual Value", fontweight='bold')
+        ax2b.set_ylabel("Frequency", fontweight='bold')
+        ax2b.set_title(f"Residual Histogram (σ={np.std(residuals):.4f})", fontweight='bold')
+        ax2b.grid(True, alpha=0.3, axis='y')
+        
+        st.pyplot(fig2)
+        plt.close(fig2)
+        
+        # PLOT 3: Linear Scale Comparison
+        fig3, ax3 = plt.subplots(figsize=(14, 6))
+        
+        ax3.errorbar(ts, fluxes, yerr=flux_errs, fmt='o', color='gray', 
+                    alpha=0.4, markersize=5, label='Observed Data', capsize=3)
+        ax3.plot(recon_t, recon_flux, color='#FF4B4B', linewidth=3, 
+                label='BiLSTM Reconstruction')
+        ax3.set_xlabel("Time [seconds]", fontsize=12, fontweight='bold')
+        ax3.set_ylabel("Flux [erg/cm²/s]", fontsize=12, fontweight='bold')
+        ax3.set_title("Light Curve - Linear Scale", fontsize=14, fontweight='bold')
+        ax3.set_yscale('log')
+        ax3.set_xscale('log')
+        ax3.legend(loc='best', framealpha=0.9)
+        ax3.grid(True, alpha=0.3, which='both')
+        
+        st.pyplot(fig3)
+        plt.close(fig3)
+        
+        # PLOT 4: Temporal Decay Analysis
+        fig4, ax4 = plt.subplots(figsize=(14, 6))
+        
+        # Calculate decay indices (local slopes)
+        window_size = max(3, len(recon_log_t) // 50)
+        decay_indices = []
+        decay_times = []
+        
+        for i in range(window_size, len(recon_log_t) - window_size):
+            t_window = recon_log_t[i-window_size:i+window_size].flatten()
+            f_window = predictions_log[i-window_size:i+window_size].flatten()
+            slope, _ = np.polyfit(t_window, f_window, 1)
+            decay_indices.append(slope)
+            decay_times.append(recon_log_t[i])
+        
+        ax4.plot(decay_times, decay_indices, color='#00C853', linewidth=2.5)
+        ax4.axhline(y=0, color='red', linestyle='--', linewidth=1.5, alpha=0.7)
+        ax4.set_xlabel("log(Time) [seconds]", fontsize=12, fontweight='bold')
+        ax4.set_ylabel("Temporal Decay Index (d log F / d log t)", fontsize=12, fontweight='bold')
+        ax4.set_title("Evolution of Temporal Decay Index", fontsize=14, fontweight='bold')
+        ax4.grid(True, alpha=0.3)
+        
+        # Add reference lines for common decay laws
+        ax4.axhline(y=-1.0, color='blue', linestyle=':', linewidth=1.5, alpha=0.5, label='Shallow decay (α=-1)')
+        ax4.axhline(y=-1.5, color='purple', linestyle=':', linewidth=1.5, alpha=0.5, label='Normal decay (α=-1.5)')
+        ax4.legend(loc='best')
+        
+        st.pyplot(fig4)
+        plt.close(fig4)
+        
+        # PLOT 5: Prediction Confidence Analysis
+        fig5, ax5 = plt.subplots(figsize=(14, 6))
+        
+        # Calculate point-wise uncertainty based on local residual variance
+        uncertainty_window = max(5, len(log_ts) // 20)
+        local_uncertainties = []
+        
+        for i, t_pred in enumerate(recon_log_t):
+            # Find nearest training points
+            distances = np.abs(log_ts - t_pred)
+            nearest_idx = np.argsort(distances)[:uncertainty_window]
+            local_residuals = residuals[nearest_idx]
+            local_uncertainties.append(np.std(local_residuals))
+        
+        local_uncertainties = np.array(local_uncertainties)
+        
+        ax5.plot(recon_log_t, predictions_log, color='#FF4B4B', linewidth=2.5, 
+                label='Reconstruction', zorder=5)
+        ax5.fill_between(recon_log_t.flatten(),
+                        predictions_log.flatten() - 2*local_uncertainties,
+                        predictions_log.flatten() + 2*local_uncertainties,
+                        color='#FF4B4B', alpha=0.3, label='Local 2σ Uncertainty')
+        ax5.scatter(log_ts, log_fluxes, color='gray', alpha=0.5, s=30, 
+                   label='Training Data', zorder=3)
+        ax5.set_xlabel("log(Time) [seconds]", fontsize=12, fontweight='bold')
+        ax5.set_ylabel("log(Flux) [erg/cm²/s]", fontsize=12, fontweight='bold')
+        ax5.set_title("Reconstruction with Local Uncertainty Estimation", fontsize=14, fontweight='bold')
+        ax5.legend(loc='best', framealpha=0.9)
+        ax5.grid(True, alpha=0.3)
+        
+        st.pyplot(fig5)
+        plt.close(fig5)
+        
+        # PLOT 6: Training Loss Evolution (Enhanced)
+        fig6, (ax6a, ax6b) = plt.subplots(1, 2, figsize=(14, 5))
+        
+        # Loss curve
+        ax6a.plot(history.history['loss'], color='#0068C9', linewidth=2.5)
+        ax6a.set_xlabel("Epoch", fontweight='bold')
+        ax6a.set_ylabel("Loss (MSE)", fontweight='bold')
+        ax6a.set_title("Training Loss Evolution", fontweight='bold')
+        ax6a.set_yscale('log')
+        ax6a.grid(True, alpha=0.3)
+        
+        # Loss improvement rate
+        loss_values = np.array(history.history['loss'])
+        improvement_rate = -np.diff(loss_values) / loss_values[:-1] * 100
+        ax6b.plot(range(1, len(improvement_rate)+1), improvement_rate, 
+                 color='#00C853', linewidth=2)
+        ax6b.axhline(y=0, color='red', linestyle='--', linewidth=1.5, alpha=0.7)
+        ax6b.set_xlabel("Epoch", fontweight='bold')
+        ax6b.set_ylabel("Loss Improvement Rate [%]", fontweight='bold')
+        ax6b.set_title("Learning Rate Effectiveness", fontweight='bold')
+        ax6b.grid(True, alpha=0.3)
+        
+        st.pyplot(fig6)
+        plt.close(fig6)
+        
+        # COMPREHENSIVE STATISTICAL ANALYSIS
+        st.markdown("### Detailed Statistical Analysis")
+        
+        with st.expander("Model Performance Statistics", expanded=False):
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            
+            with col_stat1:
+                st.markdown("**Residual Statistics**")
+                st.write(f"Mean Residual: {np.mean(residuals):.6f}")
+                st.write(f"Std Deviation: {np.std(residuals):.6f}")
+                st.write(f"Max Absolute Error: {np.max(np.abs(residuals)):.6f}")
+                st.write(f"RMSE: {np.sqrt(np.mean(residuals**2)):.6f}")
+                
+            with col_stat2:
+                st.markdown("**Training Metrics**")
+                st.write(f"Initial Loss: {history.history['loss'][0]:.6f}")
+                st.write(f"Final Loss: {history.history['loss'][-1]:.6f}")
+                st.write(f"Total Improvement: {(1 - history.history['loss'][-1]/history.history['loss'][0])*100:.2f}%")
+                st.write(f"Epochs Trained: {len(history.history['loss'])}")
+                
+            with col_stat3:
+                st.markdown("**Data Characteristics**")
+                st.write(f"Time Range: {ts[0]:.2e} - {ts[-1]:.2e} s")
+                st.write(f"Flux Range: {fluxes.min():.2e} - {fluxes.max():.2e}")
+                st.write(f"Mean Flux Error: {np.mean(flux_errs):.2e}")
+                st.write(f"Median SNR: {np.median(fluxes/flux_errs):.2f}")
+        
+        with st.expander("Temporal Decay Analysis", expanded=False):
+            st.markdown("**Power-Law Decay Fitting**")
+            
+            # Fit power law to reconstruction: F(t) = F0 * t^(-alpha)
+            log_params = np.polyfit(recon_log_t.flatten(), predictions_log.flatten(), 1)
+            decay_index = log_params[0]
+            normalization = 10**log_params[1]
+            
+            col_decay1, col_decay2 = st.columns(2)
+            
+            with col_decay1:
+                st.write(f"**Temporal Decay Index (α):** {decay_index:.3f}")
+                st.write(f"**Normalization Constant:** {normalization:.3e} erg/cm²/s")
+                
+                # Classify decay phase
+                if decay_index > -0.5:
+                    phase = "Plateau/Rising Phase"
+                elif -1.5 < decay_index <= -0.5:
+                    phase = "Shallow Decay Phase"
+                elif -3.0 < decay_index <= -1.5:
+                    phase = "Normal Decay Phase"
+                else:
+                    phase = "Steep Decay Phase"
+                
+                st.write(f"**Decay Phase Classification:** {phase}")
+            
+            with col_decay2:
+                st.markdown("**Reference Decay Indices:**")
+                st.write("- Plateau: α ≈ 0 to -0.5")
+                st.write("- Shallow: α ≈ -0.5 to -1.0")
+                st.write("- Normal: α ≈ -1.2 to -1.5")
+                st.write("- Steep: α < -2.0")
+        
+        with st.expander("Physical Interpretation", expanded=False):
+            st.markdown("**GRB Afterglow Physics**")
+            
+            # Calculate characteristic timescales
+            flux_half = (fluxes[0] + fluxes[-1]) / 2
+            t_half_idx = np.argmin(np.abs(fluxes - flux_half))
+            t_half = ts[t_half_idx]
+            
+            col_phys1, col_phys2 = st.columns(2)
+            
+            with col_phys1:
+                st.write(f"**Peak Flux:** {fluxes.max():.3e} erg/cm²/s")
+                st.write(f"**Time to Half-Max:** {t_half:.2e} seconds")
+                st.write(f"**Flux Decay Factor:** {fluxes.max()/fluxes.min():.1f}x")
+                st.write(f"**Observational Duration:** {(ts[-1]-ts[0])/3600:.2f} hours")
+            
+            with col_phys2:
+                st.markdown("**Energy Estimates (0.3-10 keV):**")
+                # Rough fluence calculation (trapezoidal integration)
+                fluence = np.trapz(recon_flux, recon_t)
+                st.write(f"**Estimated Fluence:** {fluence:.3e} erg/cm²")
+                st.write(f"**Mean Flux:** {np.mean(recon_flux):.3e} erg/cm²/s")
+                st.write(f"**Peak/Mean Ratio:** {fluxes.max()/np.mean(fluxes):.2f}")
+        
+        with st.expander("Model Architecture Summary", expanded=False):
+            st.markdown("**Neural Network Configuration**")
+            
+            # Get model summary
+            model_config = []
+            for i, layer in enumerate(model.layers):
+                layer_type = layer.__class__.__name__
+                if hasattr(layer, 'units'):
+                    params = f"{layer.units} units"
+                elif hasattr(layer, 'rate'):
+                    params = f"rate={layer.rate}"
+                else:
+                    params = "N/A"
+                model_config.append(f"Layer {i+1}: {layer_type} ({params})")
+            
+            for config_line in model_config:
+                st.write(config_line)
+            
+            total_params = model.count_params()
+            st.write(f"**Total Parameters:** {total_params:,}")
+            st.write(f"**Parameters per Data Point:** {total_params/len(ts):.2f}")
+        
+        with st.expander("Uncertainty Quantification", expanded=False):
+            st.markdown("**Prediction Uncertainty Analysis**")
+            
+            col_unc1, col_unc2 = st.columns(2)
+            
+            with col_unc1:
+                st.write(f"**Mean Local Uncertainty:** {np.mean(local_uncertainties):.6f}")
+                st.write(f"**Max Local Uncertainty:** {np.max(local_uncertainties):.6f}")
+                st.write(f"**Min Local Uncertainty:** {np.min(local_uncertainties):.6f}")
+                
+            with col_unc2:
+                # Identify high uncertainty regions
+                high_unc_threshold = np.mean(local_uncertainties) + 2*np.std(local_uncertainties)
+                high_unc_regions = np.sum(local_uncertainties > high_unc_threshold)
+                st.write(f"**High Uncertainty Points:** {high_unc_regions} / {len(local_uncertainties)}")
+                st.write(f"**Uncertainty Range:** {np.ptp(local_uncertainties):.6f}")
+                st.write(f"**Coefficient of Variation:** {np.std(local_uncertainties)/np.mean(local_uncertainties):.3f}")
+
+        col_export1, col_export2 = st.columns(2)
+        
+        with col_export1:
+            # Export reconstruction data
+            df_export = pd.DataFrame({
+                'log_time_seconds': recon_log_t.flatten(),
+                'time_seconds': 10**recon_log_t.flatten(),
+                'reconstructed_log_flux': predictions_log.flatten(),
+                'reconstructed_flux': 10**predictions_log.flatten(),
+                'local_uncertainty': local_uncertainties
+            })
+            
+            csv = df_export.to_csv(index=False)
+            st.download_button(
+                label="Download Reconstruction (CSV)",
+                data=csv,
+                file_name=f"{selected_name.split('(')[0].strip().replace(' ', '_')}_reconstruction.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        with col_export2:
+            # Export analysis summary
+            summary_data = {
+                'Metric': [
+                    'Data Points', 'Final Loss', 'RMSE', 'Decay Index',
+                    'Peak Flux', 'Time to Half-Max', 'Total Parameters',
+                    'Mean Uncertainty'
+                ],
+                'Value': [
+                    len(ts), history.history['loss'][-1], np.sqrt(np.mean(residuals**2)),
+                    decay_index, fluxes.max(), t_half, model.count_params(),
+                    np.mean(local_uncertainties)
+                ]
+            }
+            df_summary = pd.DataFrame(summary_data)
+            csv_summary = df_summary.to_csv(index=False)
+            
+            st.download_button(
+                label="Download Analysis Summary (CSV)",
+                data=csv_summary,
+                file_name=f"{selected_name.split('(')[0].strip().replace(' ', '_')}_summary.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
         
         # ADDITIONAL INFO
         with st.expander("About This Reconstruction"):
