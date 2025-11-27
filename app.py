@@ -179,6 +179,7 @@ model_mode = st.sidebar.radio("Architecture Mode",
 
 manual_config = None
 use_dropout = False
+manual_epochs = None
 
 if model_mode == "Manual Configuration":
     arch_type = st.sidebar.selectbox("Architecture Type", 
@@ -186,15 +187,15 @@ if model_mode == "Manual Configuration":
     
     if arch_type == "Lightweight":
         layers = [32, 32]
-        epochs = 120
+        manual_epochs = 120
         batch_size = 2
     elif arch_type == "Standard":
         layers = [64, 64, 32]
-        epochs = 80
+        manual_epochs = 80
         batch_size = 4
     elif arch_type == "Deep":
         layers = [128, 128, 64, 64]
-        epochs = 50
+        manual_epochs = 50
         batch_size = 8
     else:
         num_layers = st.sidebar.slider("Number of Layers", 2, 5, 3)
@@ -202,10 +203,10 @@ if model_mode == "Manual Configuration":
         for i in range(num_layers):
             units = st.sidebar.slider(f"Layer {i+1} Units", 16, 256, 64, step=16)
             layers.append(units)
-        epochs = st.sidebar.slider("Training Epochs", 20, 200, 80, step=10)
+        manual_epochs = st.sidebar.slider("Training Epochs", 20, 200, 80, step=10)
         batch_size = st.sidebar.slider("Batch Size", 1, 16, 4)
     
-    manual_config = (arch_type, layers, epochs, batch_size)
+    manual_config = (arch_type, layers, manual_epochs, batch_size)
     use_dropout = st.sidebar.checkbox("Use Dropout Regularization", value=False)
 
 st.sidebar.markdown("---")
@@ -217,11 +218,9 @@ learning_rate = st.sidebar.select_slider("Learning Rate",
 st.session_state['learning_rate'] = learning_rate
 
 epoch_override = st.sidebar.checkbox("Override Epoch Count", value=False)
+custom_epochs = None
 if epoch_override:
     custom_epochs = st.sidebar.slider("Number of Epochs", 10, 300, 80, step=10)
-    st.session_state['custom_epochs'] = custom_epochs
-else:
-    st.session_state['custom_epochs'] = None
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("4. Reconstruction Settings")
@@ -279,6 +278,10 @@ if run_btn:
         
         # BUILD & TRAIN
         model, epochs, batch = build_adaptive_model(len(ts), manual_config, use_dropout)
+        
+        # Apply epoch override if set
+        if st.session_state.get('custom_epochs'):
+            epochs = st.session_state['custom_epochs']
         
         progress_bar = st.progress(0)
         status_text = st.empty()
