@@ -578,14 +578,14 @@ if 'results' in st.session_state:
     
     # VISUALIZATION
     st.subheader(f"Temporal Reconstruction: {selected_name.split('(')[0].strip()}")
-        
-        # PLOT 1: Main Light Curve
-        fig1, ax1 = plt.subplots(figsize=(14, 7))
-        
-        ax1.errorbar(log_ts, log_fluxes, yerr=flux_errs/(fluxes*np.log(10)), 
-                   fmt='o', color='gray', alpha=0.4, markersize=5, 
-                   label='Swift-XRT Observed Data', capsize=3)
-        
+    
+    # PLOT 1: Main Light Curve
+    fig1, ax1 = plt.subplots(figsize=(14, 7))
+    
+    ax1.errorbar(log_ts, log_fluxes, yerr=flux_errs/(fluxes*np.log(10)), 
+               fmt='o', color='gray', alpha=0.4, markersize=5, 
+               label='Swift-XRT Observed Data', capsize=3)
+    
         ax1.plot(recon_log_t, predictions_log, color='#FF4B4B', linewidth=3, 
                label='BiLSTM Reconstruction', zorder=5)
         
