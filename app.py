@@ -216,6 +216,13 @@ learning_rate = st.sidebar.select_slider("Learning Rate",
                                          value=0.001)
 st.session_state['learning_rate'] = learning_rate
 
+epoch_override = st.sidebar.checkbox("Override Epoch Count", value=False)
+if epoch_override:
+    custom_epochs = st.sidebar.slider("Number of Epochs", 10, 300, 80, step=10)
+    st.session_state['custom_epochs'] = custom_epochs
+else:
+    st.session_state['custom_epochs'] = None
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("4. Reconstruction Settings")
 
