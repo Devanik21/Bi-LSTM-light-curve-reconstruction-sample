@@ -321,29 +321,13 @@ with st.sidebar.expander("GRB Classification Guide"):
 
 # --- MAIN EXECUTION ---
 if run_btn:
-    # Store all results in session state to prevent rerun issues if 'results' not in st.session_state or st.session_state.get('last_run_config') != (selected_name, model_mode, learning_rate, custom_epochs, resolution_factor, time_filter_min):
-    st.session_state['last_run_config'] = (selected_name, model_mode, learning_rate, custom_epochs, resolution_factor, time_filter_min)
-    
     with st.spinner(f"Contacting Swift-XRT Repository for {selected_name.split('(')[0].strip()}..."):
         raw_data, error_msg = fetch_swift_data(target_id)
-    
+        
     if error_msg:
         st.error(f"Error: {error_msg}")
-        st.stop()
     else:
         st.success(f"Connection Established! Downloaded {len(raw_data)} data points.")
-        status_container = st.empty()
-        progress_container = st.empty()
-        with status_container:
-            st.success(f"Step 1/5: Successfully downloaded {len(raw_data)} data points from Swift-XRT")
-        progress_container.progress(0.25)
-        time.sleep(0.5)
-        
-        # Step 2: Data Preprocessing
-        with status_container:
-            st.info("Step 2/5: Preprocessing X-ray light curve data...")
-        progress_container.progress(0.30)
-        time.sleep(0.4)
         
         # DATA PREPROCESSING
         ts = raw_data['t'].values
@@ -355,11 +339,6 @@ if run_btn:
         ts = ts[mask]
         fluxes = fluxes[mask]
         flux_errs = flux_errs[mask]
-        
-        with status_container:
-            st.info("Step 2/5: Applying log-transformation and normalization...")
-        progress_container.progress(0.38)
-        time.sleep(0.3)
         
         log_ts = np.log10(ts)
         log_fluxes = np.log10(fluxes)
@@ -373,17 +352,6 @@ if run_btn:
         y_scaled = scaler_y.fit_transform(y)
         X_seq = X_scaled.reshape(X_scaled.shape[0], 1, 1)
         
-        with status_container:
-            st.success(f"Step 2/5: Data preprocessed - {len(ts)} valid points after filtering")
-        progress_container.progress(0.45)
-        time.sleep(0.4)
-        
-        # Step 3: Build Architecture
-        with status_container:
-            st.info("Step 3/5: Building adaptive BiLSTM neural network architecture...")
-        progress_container.progress(0.50)
-        time.sleep(0.5)
-        
         # BUILD & TRAIN
         model, epochs, batch = build_adaptive_model(len(ts), manual_config, use_dropout)
         
@@ -391,39 +359,21 @@ if run_btn:
         if custom_epochs is not None:
             epochs = custom_epochs
         
-        with status_container:
-            st.success(f"Step 3/5: Neural network initialized - {model.count_params():,} trainable parameters")
-        progress_container.progress(0.55)
-        time.sleep(0.4)
-        
-        # Step 4: Training
-        with status_container:
-            st.info(f"Step 4/5: Training BiLSTM model for {epochs} epochs...")
-        
-        training_progress = st.progress(0.55)
-        training_status = st.empty()
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
         class ProgressBarCallback(tf.keras.callbacks.Callback):
             def on_epoch_end(self, epoch, logs=None):
-                # Progress from 0.55 to 0.85 during training
-                progress = 0.55 + (0.30 * (epoch + 1) / epochs)
-                training_progress.progress(progress)
-                training_status.info(f"Step 4/5: Training Epoch {epoch+1}/{epochs} - Loss: {logs['loss']:.6f}")
+                progress = (epoch + 1) / epochs
+                progress_bar.progress(progress)
+                status_text.text(f"Training Epoch {epoch+1}/{epochs} - Loss: {logs['loss']:.6f}")
 
-        history = model.fit(X_seq, y_scaled, epochs=epochs, batch_size=batch, 
-                          verbose=0, callbacks=[ProgressBarCallback()])
+        with st.spinner("Training BiLSTM on burst-specific physics..."):
+            history = model.fit(X_seq, y_scaled, epochs=epochs, batch_size=batch, 
+                              verbose=0, callbacks=[ProgressBarCallback()])
         
-        training_status.empty()
-        with status_container:
-            st.success(f"Step 4/5: Training complete - Final loss: {history.history['loss'][-1]:.6f}")
-        training_progress.progress(0.85)
-        time.sleep(0.4)
-        
-        # Step 5: Reconstruction and Analysis
-        with status_container:
-            st.info("Step 5/5: Generating high-resolution reconstruction...")
-        training_progress.progress(0.88)
-        time.sleep(0.3)
+        progress_bar.empty()
+        status_text.empty()
         
         # INFERENCE
         recon_log_t = create_reconstruction_points(log_ts, resolution_factor)
@@ -432,11 +382,6 @@ if run_btn:
         
         predictions_scaled = model.predict(recon_seq, verbose=0)
         predictions_log = scaler_y.inverse_transform(predictions_scaled)
-        
-        with status_container:
-            st.info("Step 5/5: Computing residuals and uncertainty estimates...")
-        training_progress.progress(0.92)
-        time.sleep(0.3)
         
         # Calculate residuals and statistics
         train_predictions_scaled = model.predict(X_seq, verbose=0)
@@ -447,152 +392,32 @@ if run_btn:
         recon_t = 10**recon_log_t.flatten()
         recon_flux = 10**predictions_log.flatten()
         
-        with status_container:
-            st.info("Step 5/5: Calculating temporal decay indices...")
-        training_progress.progress(0.95)
-        time.sleep(0.3)
+        # VISUALIZATION
+        st.subheader(f"Temporal Reconstruction: {selected_name.split('(')[0].strip()}")
         
-        # Calculate decay indices
-        window_size = max(3, len(recon_log_t) // 50)
-        decay_indices = []
-        decay_times = []
+        # PLOT 1: Main Light Curve
+        fig1, ax1 = plt.subplots(figsize=(14, 7))
         
-        for i in range(window_size, len(recon_log_t) - window_size):
-            t_window = recon_log_t[i-window_size:i+window_size].flatten()
-            f_window = predictions_log[i-window_size:i+window_size].flatten()
-            slope, _ = np.polyfit(t_window, f_window, 1)
-            decay_indices.append(slope)
-            decay_times.append(recon_log_t[i])
+        ax1.errorbar(log_ts, log_fluxes, yerr=flux_errs/(fluxes*np.log(10)), 
+                   fmt='o', color='gray', alpha=0.4, markersize=5, 
+                   label='Swift-XRT Observed Data', capsize=3)
         
-        with status_container:
-            st.info("Step 5/5: Performing local uncertainty quantification...")
-        training_progress.progress(0.97)
-        time.sleep(0.3)
+        ax1.plot(recon_log_t, predictions_log, color='#FF4B4B', linewidth=3, 
+               label='BiLSTM Reconstruction', zorder=5)
         
-        # Calculate local uncertainties
-        uncertainty_window = max(5, len(log_ts) // 20)
-        local_uncertainties = []
+        if show_confidence:
+            std_residual = np.std(residuals)
+            ax1.fill_between(recon_log_t.flatten(), 
+                           predictions_log.flatten() - 2*std_residual,
+                           predictions_log.flatten() + 2*std_residual,
+                           color='#FF4B4B', alpha=0.2, label='95% Confidence Interval')
         
-        for i, t_pred in enumerate(recon_log_t):
-            distances = np.abs(log_ts - t_pred)
-            nearest_idx = np.argsort(distances)[:uncertainty_window]
-            local_residuals = residuals[nearest_idx]
-            local_uncertainties.append(np.std(local_residuals))
+        ax1.set_xlabel("log(Time) [seconds]", fontsize=12, fontweight='bold')
+        ax1.set_ylabel("log(Flux) [erg/cm²/s]", fontsize=12, fontweight='bold')
+        ax1.set_title(f"X-ray Light Curve: {selected_name}", fontsize=14, fontweight='bold')
+        ax1.legend(loc='best', framealpha=0.9)
+        ax1.grid(True, alpha=0.3, linestyle='--')
         
-        local_uncertainties = np.array(local_uncertainties)
-        
-        with status_container:
-            st.info("Step 5/5: Fitting power-law decay model...")
-        training_progress.progress(0.99)
-        time.sleep(0.2)
-        
-        # Power-law fitting
-        log_params = np.polyfit(recon_log_t.flatten(), predictions_log.flatten(), 1)
-        decay_index = log_params[0]
-        normalization = 10**log_params[1]
-        
-        # Characteristic timescales
-        flux_half = (fluxes[0] + fluxes[-1]) / 2
-        t_half_idx = np.argmin(np.abs(fluxes - flux_half))
-        t_half = ts[t_half_idx]
-        
-        # Fluence calculation
-        fluence = np.trapz(recon_flux, recon_t)
-        
-        with status_container:
-            st.success("Step 5/5: Reconstruction complete! Analysis ready.")
-        training_progress.progress(1.0)
-        time.sleep(0.5)
-        
-        # Clear status displays
-        status_container.empty()
-        training_progress.empty()
-        
-        # Final success message
-        st.balloons()
-        st.success(f"Analysis Complete! Reconstructed {len(recon_log_t)} points from {len(ts)} observations.")
-        
-        # Store all results in session state
-        st.session_state['results'] = {
-            'selected_name': selected_name,
-            'ts': ts,
-            'fluxes': fluxes,
-            'flux_errs': flux_errs,
-            'log_ts': log_ts,
-            'log_fluxes': log_fluxes,
-            'recon_log_t': recon_log_t,
-            'recon_t': recon_t,
-            'predictions_log': predictions_log,
-            'recon_flux': recon_flux,
-            'residuals': residuals,
-            'history': history.history,
-            'decay_indices': decay_indices,
-            'decay_times': decay_times,
-            'local_uncertainties': local_uncertainties,
-            'decay_index': decay_index,
-            'normalization': normalization,
-            't_half': t_half,
-            'fluence': fluence,
-            'model': model,
-            'epochs': epochs,
-            'batch': batch,
-            'manual_config': manual_config,
-            'use_dropout': use_dropout
-        }
-
-# Display results if they exist in session state
-if 'results' in st.session_state:
-    results = st.session_state['results']
-    
-    # Extract all variables from session state
-    selected_name = results['selected_name']
-    ts = results['ts']
-    fluxes = results['fluxes']
-    flux_errs = results['flux_errs']
-    log_ts = results['log_ts']
-    log_fluxes = results['log_fluxes']
-    recon_log_t = results['recon_log_t']
-    recon_t = results['recon_t']
-    predictions_log = results['predictions_log']
-    recon_flux = results['recon_flux']
-    residuals = results['residuals']
-    history_dict = results['history']
-    decay_indices = results['decay_indices']
-    decay_times = results['decay_times']
-    local_uncertainties = results['local_uncertainties']
-    decay_index = results['decay_index']
-    normalization = results['normalization']
-    t_half = results['t_half']
-    fluence = results['fluence']
-    model = results['model']
-    epochs = results['epochs']
-    
-    # VISUALIZATION
-    st.subheader(f"Temporal Reconstruction: {selected_name.split('(')[0].strip()}")
-    
-    # PLOT 1: Main Light Curve
-    fig1, ax1 = plt.subplots(figsize=(14, 7))
-    
-    ax1.errorbar(log_ts, log_fluxes, yerr=flux_errs/(fluxes*np.log(10)), 
-               fmt='o', color='gray', alpha=0.4, markersize=5, 
-               label='Swift-XRT Observed Data', capsize=3)
-
-    ax1.plot(recon_log_t, predictions_log, color='#FF4B4B', linewidth=3, 
-           label='BiLSTM Reconstruction', zorder=5)
-    
-    if show_confidence:
-        std_residual = np.std(residuals)
-        ax1.fill_between(recon_log_t.flatten(), 
-                       predictions_log.flatten() - 2*std_residual,
-                       predictions_log.flatten() + 2*std_residual,
-                       color='#FF4B4B', alpha=0.2, label='95% Confidence Interval')
-    
-    ax1.set_xlabel("log(Time) [seconds]", fontsize=12, fontweight='bold')
-    ax1.set_ylabel("log(Flux) [erg/cm²/s]", fontsize=12, fontweight='bold')
-    ax1.set_title(f"X-ray Light Curve: {selected_name}", fontsize=14, fontweight='bold')
-    ax1.legend(loc='best', framealpha=0.9)
-    ax1.grid(True, alpha=0.3, linestyle='--')
-    
         st.pyplot(fig1)
         plt.close(fig1)
         
