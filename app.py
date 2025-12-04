@@ -461,26 +461,30 @@ if run_btn:
         st.subheader(f"Light Curve Reconstruction: {selected_name.split('(')[0].strip()}")
         
         # PLOT 1: Model Comparison
-        plt.style.use('seaborn-v0_8-whitegrid')
+        plt.style.use('dark_background')
         plt.rcParams['font.family'] = 'serif'
         fig1, ax1 = plt.subplots(figsize=(14, 7))
-        fig1.patch.set_facecolor('#FDFBF6');
-        ax1.set_facecolor('#FDFBF6')
+        fig1.patch.set_facecolor('#0E1117')
+        ax1.set_facecolor('#0E1117')
         
         ax1.errorbar(log_ts, log_fluxes, yerr=flux_errs/(fluxes*np.log(10)), 
-                   fmt='o', color='gray', alpha=0.4, markersize=5, 
-                   label='Swift-XRT Data', capsize=3)
+                   fmt='o', color='#999999', ecolor='#444444', alpha=0.6, markersize=5,
+                   label='Swift-XRT Data', capsize=3, zorder=1)
+        # Add a glow effect for data points
+        ax1.scatter(log_ts, log_fluxes, color='#FFFFFF', s=15, alpha=0.7, zorder=2)
         
-        # Earthy color palette
-        colors = {'mlp': '#C85A5A', 'bilstm': '#5A8D6A', 
-                 'attention_unet': '#A98658', 'mamba': '#5A7C8D'}
+        # Space-themed vibrant color palette
+        colors = {'mlp': '#00FFFF',          # Cyan
+                  'bilstm': '#FF00FF',       # Magenta
+                  'attention_unet': '#FFFF00', # Yellow
+                  'mamba': '#00FF00'}         # Green
         labels = {'mlp': 'MLP (MSE: 0.0275)', 'bilstm': 'BiLSTM',
                  'attention_unet': 'Attention U-Net', 'mamba': 'Bi-Mamba'}
         
         for model_type, result in results.items():
             ax1.plot(recon_log_t, result['predictions'], 
-                    color=colors[model_type], linewidth=2.5, 
-                    label=labels[model_type], alpha=0.9)
+                    color=colors[model_type], linewidth=2.5,
+                    label=labels[model_type], alpha=0.9, zorder=3)
             
             if show_confidence:
                 std_resid = np.std(result['residuals'])
@@ -489,12 +493,12 @@ if run_btn:
                 lower_bound = result['predictions'].flatten() - 1.96 * std_resid
                 ax1.fill_between(recon_log_t.flatten(), lower_bound, upper_bound,
                                  color=colors[model_type], alpha=0.15,
-                                 label=f'{labels[model_type]} 95% CI')
+                                 label=f'{labels[model_type]} 95% CI', zorder=0)
         
         ax1.set_xlabel("log(Time) [seconds]", fontsize=12, fontweight='bold')
         ax1.set_ylabel("log(Flux) [erg/cm²/s]", fontsize=12, fontweight='bold')
         ax1.set_title(f"Multi-Model Reconstruction: {selected_name}", fontsize=14, fontweight='bold')
-        ax1.legend(loc='best', framealpha=0.9, facecolor='#FFFFFF')
+        ax1.legend(loc='best', framealpha=0.7)
         ax1.grid(True, alpha=0.5, linestyle='--')
         
         st.pyplot(fig1)
@@ -511,27 +515,27 @@ if run_btn:
         
         # PLOT 2: Residual Comparison
         st.markdown("### Residual Analysis")
-        fig2, axes = plt.subplots(2, 2, figsize=(14, 10), facecolor='#FDFBF6')
-        fig2.patch.set_facecolor('#FDFBF6')
+        fig2, axes = plt.subplots(2, 2, figsize=(14, 10), facecolor='#0E1117')
+        fig2.patch.set_facecolor('#0E1117')
 
         axes = axes.flatten()
         
         for idx, (model_type, result) in enumerate(results.items()):
             if idx < 4:
                 axes[idx].scatter(log_ts, result['residuals'], 
-                                color=colors[model_type], alpha=0.6, s=40)
-                axes[idx].axhline(y=0, color='red', linestyle='--', linewidth=2)
+                                color=colors[model_type], alpha=0.7, s=40, edgecolors='w', linewidths=0.5)
+                axes[idx].axhline(y=0, color='#FF4B4B', linestyle='--', linewidth=2)
                 axes[idx].axhline(y=np.mean(result['residuals']), color='orange', 
                                 linestyle='--', linewidth=1.5)
                 axes[idx].fill_between(log_ts, -2*np.std(result['residuals']), 
                                       2*np.std(result['residuals']), 
-                                      alpha=0.2, color='gray')
+                                      alpha=0.2, color='#888888')
                 axes[idx].set_xlabel("log(Time) [s]", fontweight='bold')
                 axes[idx].set_ylabel("Residual", fontweight='bold')
                 axes[idx].set_title(f"{labels[model_type]} - σ={np.std(result['residuals']):.4f}", 
                                   fontweight='bold')
                 axes[idx].grid(True, alpha=0.5, linestyle='--')
-                axes[idx].set_facecolor('#FDFBF6')
+                axes[idx].set_facecolor('#1a1a1a')
         
         plt.tight_layout()
         st.pyplot(fig2)
@@ -539,22 +543,22 @@ if run_btn:
         
         # PLOT 3: MSE Comparison Bar Chart
         st.markdown("### Performance Metrics")
-        fig3, (ax3a, ax3b) = plt.subplots(1, 2, figsize=(14, 5), facecolor='#FDFBF6')
-        fig3.patch.set_facecolor('#FDFBF6')
+        fig3, (ax3a, ax3b) = plt.subplots(1, 2, figsize=(14, 5), facecolor='#0E1117')
+        fig3.patch.set_facecolor('#0E1117')
         
         model_names = [labels[m] for m in results.keys()]
         mse_values = [results[m]['mse'] for m in results.keys()]
         rmse_values = [results[m]['rmse'] for m in results.keys()]
         
         ax3a.bar(model_names, mse_values, color=[colors[m] for m in results.keys()])
-        ax3a.set_facecolor('#FDFBF6')
+        ax3a.set_facecolor('#1a1a1a')
         ax3a.set_ylabel("MSE", fontweight='bold')
         ax3a.set_title("Mean Squared Error Comparison", fontweight='bold')
         ax3a.tick_params(axis='x', rotation=45)
         ax3a.grid(True, alpha=0.5, axis='y', linestyle='--')
         
         ax3b.bar(model_names, rmse_values, color=[colors[m] for m in results.keys()])
-        ax3b.set_facecolor('#FDFBF6')
+        ax3b.set_facecolor('#1a1a1a')
         ax3b.set_ylabel("RMSE", fontweight='bold')
         ax3b.set_title("Root Mean Squared Error Comparison", fontweight='bold')
         ax3b.tick_params(axis='x', rotation=45)
