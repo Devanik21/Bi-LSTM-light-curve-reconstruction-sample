@@ -276,12 +276,12 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("6. Paper Implementations")
 paper_model_select = st.sidebar.selectbox("Select Paper Model", 
                                           ["None", 
-                                           "Model 1: Quadratic Smoothing Spline (GRB 231210B)",
+                                           "Model 1: Attention U-Net Reconstruction (GRB 231210B)",
                                            "Model 2: Coming Soon",
                                            "Model 3: Coming Soon"])
 
 run_paper_btn = False
-if paper_model_select == "Model 1: Quadratic Smoothing Spline (GRB 231210B)":
+if paper_model_select == "Model 1: Attention U-Net Reconstruction (GRB 231210B)":
     dataset_url = st.sidebar.text_input("Dataset URL (GitHub Raw)", 
         value="https://raw.githubusercontent.com/Devanik21/Bi-LSTM-light-curve-reconstruction-sample/refs/heads/main/GRB%20Data/GRB231210B_trimmed.csv")
     run_paper_btn = st.sidebar.button("Run Paper Model 1", type="primary")
