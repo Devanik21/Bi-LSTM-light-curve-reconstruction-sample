@@ -14,6 +14,8 @@ from tensorflow.keras.layers import (LSTM, Bidirectional, Dense, Dropout,
                                      Input, Conv1D, UpSampling1D, Concatenate,
                                      MultiHeadAttention, LayerNormalization, Add)
 from tensorflow.keras import initializers
+from scipy.interpolate import UnivariateSpline
+import os
 
 # --- CONFIGURATION & SEEDS ---
 st.set_page_config(page_title="Multi-Model GRB Reconstructor", layout="wide")
@@ -269,6 +271,20 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("5. Visualization")
 
 show_confidence = st.sidebar.checkbox("Show Confidence Intervals", value=False)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("6. Paper Implementations")
+paper_model_select = st.sidebar.selectbox("Select Paper Model", 
+                                          ["None", 
+                                           "Model 1: Quadratic Smoothing Spline (GRB 231210B)",
+                                           "Model 2: Coming Soon",
+                                           "Model 3: Coming Soon"])
+
+run_paper_btn = False
+if paper_model_select == "Model 1: Quadratic Smoothing Spline (GRB 231210B)":
+    dataset_url = st.sidebar.text_input("Dataset URL (GitHub Raw)", 
+        value="https://raw.githubusercontent.com/username/repo/main/GRB%20Data/GRB231210B_trimmed.csv")
+    run_paper_btn = st.sidebar.button("Run Paper Model 1", type="primary")
 
 st.sidebar.markdown("---")
 run_btn = st.sidebar.button("Fetch & Reconstruct", type="primary", use_container_width=True)
@@ -630,6 +646,160 @@ if run_btn:
                 mime="text/csv",
                 use_container_width=True
             )
+
+elif run_paper_btn:
+    st.subheader("Paper Model 1: Quadratic Smoothing Spline on GRB 231210B")
+    
+    def train_spline():
+        with st.spinner("Loading data and training spline model..."):
+            # 1. Load Data
+            try:
+                # In a real scenario, replace with the actual raw GitHub URL
+                # For now, we try to read from the provided URL or fallback to a mock if it fails/is placeholder
+                if "username/repo" in dataset_url:
+                    st.warning("Using placeholder URL. Please update the Dataset URL in the sidebar to point to the raw CSV.")
+                    # Mock data for demonstration if URL is invalid
+                    # Creating synthetic GRB 231210B-like data
+                    t_mock = np.logspace(1, 5, 50)
+                    f_mock = 1e-10 * (t_mock**-1.5) * (1 + 0.1*np.random.randn(50))
+                    trimmed_data = pd.DataFrame({'time': t_mock, 'flux': f_mock, 'flux_err': 0.1*f_mock})
+                else:
+                    response = requests.get(dataset_url)
+                    if response.status_code == 200:
+                        trimmed_data = pd.read_csv(io.StringIO(response.text))
+                    else:
+                        st.error(f"Failed to load data from URL: {response.status_code}")
+                        return
+            except Exception as e:
+                st.error(f"Error loading data: {e}")
+                return
+
+            grb_name = "GRB231210B"
+            folder_path = "." 
+            
+            # Identify columns
+            cols = trimmed_data.columns
+            t_col = next((c for c in cols if 'time' in c.lower() or 't' == c.lower()), cols[0])
+            f_col = next((c for c in cols if 'flux' in c.lower()), cols[1])
+            err_col = next((c for c in cols if 'err' in c.lower()), None)
+
+            t_val = trimmed_data[t_col].values
+            f_val = trimmed_data[f_col].values
+            
+            # Filter valid
+            mask = (t_val > 0) & (f_val > 0)
+            t_val = t_val[mask]
+            f_val = f_val[mask]
+            
+            train_x_denorm = np.log10(t_val)
+            train_y_denorm = np.log10(f_val)
+            
+            # Errors
+            if err_col:
+                f_err = trimmed_data[err_col].values[mask]
+                # Log error propagation: err_log = err / (f * ln(10))
+                y_err_log = f_err / (f_val * np.log(10))
+                lower_err_log = y_err_log
+                upper_err_log = y_err_log
+            else:
+                lower_err_log = np.zeros_like(f_val)
+                upper_err_log = np.zeros_like(f_val)
+
+            # Spline Fitting
+            sort_idx = np.argsort(train_x_denorm)
+            x_sorted = train_x_denorm[sort_idx]
+            y_sorted = train_y_denorm[sort_idx]
+            w_sorted = 1.0 / (lower_err_log[sort_idx] + 1e-9)
+
+            spline = UnivariateSpline(x_sorted, y_sorted, w=w_sorted, k=2)
+            
+            # Reconstruction
+            test_x_denorm = np.linspace(x_sorted.min(), x_sorted.max(), 100)
+            mean_prediction_denorm = spline(test_x_denorm)
+            
+            # Bootstrap for CI
+            n_boot = 100
+            boot_preds = []
+            residuals = y_sorted - spline(x_sorted)
+            for _ in range(n_boot):
+                y_boot = spline(x_sorted) + np.random.choice(residuals, size=len(y_sorted), replace=True)
+                try:
+                    sp_boot = UnivariateSpline(x_sorted, y_boot, w=w_sorted, k=2)
+                    boot_preds.append(sp_boot(test_x_denorm))
+                except: pass
+            
+            if boot_preds:
+                boot_preds = np.array(boot_preds)
+                lower_denorm = np.percentile(boot_preds, 2.5, axis=0)
+                upper_denorm = np.percentile(boot_preds, 97.5, axis=0)
+            else:
+                lower_denorm = mean_prediction_denorm - 0.1
+                upper_denorm = mean_prediction_denorm + 0.1
+
+            # Synthetic Reconstruction Points
+            expanded = test_x_denorm.reshape(-1, 1)
+            recon_errorbar = (upper_denorm - lower_denorm) / 4.0
+            log_reconstructed_flux = mean_prediction_denorm + np.random.normal(0, recon_errorbar, size=len(mean_prediction_denorm))
+            recon_denorm_log = log_reconstructed_flux
+            sampled_time_errs = np.abs(test_x_denorm * 0.01)
+            sampled_flux_errs = recon_errorbar
+
+            # --- PLOTTING ---
+            fig = plt.figure(figsize=(10, 6))
+            
+            # a) Plot original data with updated y-errors
+            plt.errorbar(train_x_denorm, train_y_denorm, zorder=4, yerr=[lower_err_log, upper_err_log], linestyle="")
+
+            # b) Plot reconstructed points with synthetic error bars
+            plt.errorbar(test_x_denorm, log_reconstructed_flux, linestyle='none', yerr=np.abs(recon_errorbar), marker='o', capsize=5, color='yellow', zorder=3, label="Reconstructed Points")
+
+            # c) Scatter original observed points on top
+            plt.scatter(train_x_denorm, train_y_denorm, zorder=5, label="Observed Points")
+
+            # d) Plot the mean prediction curve
+            plt.plot(test_x_denorm, mean_prediction_denorm, label="Mean Prediction", zorder=2)
+
+            # e) Add 95% confidence interval shading
+            plt.fill_between(test_x_denorm.flatten(), lower_denorm, upper_denorm, alpha=0.5, color='orange', label="95% Confidence Region", zorder=1)
+
+            plt.legend(loc='lower left')
+            plt.xlabel('log$_{10}$(Time) (s)', fontsize=15)
+            plt.ylabel('log$_{10}$(Flux) ($erg\\,cm^{-2}\\,s^{-1}$)', fontsize=15)
+            plt.title(f'Quadratic Smoothing Spline on {grb_name}', fontsize=18)
+            # plt.savefig(f"{folder_path}/Figures/{grb_name}.png", dpi=300) # Disabled for Streamlit
+            # print("\n----- RECONSTRUCTED GRB (Figure saved) -----\n")
+            # plt.show() # Disabled for Streamlit
+            st.pyplot(fig)
+
+            # 11) Build combined DataFrame
+            combined_df = trimmed_data.copy(deep=True)
+            new_rows = []
+            for i in range(len(expanded)):
+                logt_pt = expanded[i][0]
+                t_lin = 10 ** logt_pt
+                pos_t_lin = 10 ** (logt_pt + sampled_time_errs[i])
+                neg_t_lin = 10 ** (logt_pt - sampled_time_errs[i])
+                flux_lin = 10 ** recon_denorm_log[i]
+                pos_f_lin = 10 ** (recon_denorm_log[i] + sampled_flux_errs[i])
+                neg_f_lin = 10 ** (recon_denorm_log[i] - sampled_flux_errs[i])
+                new_rows.append({
+                    "t": t_lin,
+                    "pos_t_err": abs(pos_t_lin - t_lin),
+                    "neg_t_err": abs(t_lin - neg_t_lin),
+                    "flux": flux_lin,
+                    "pos_flux_err": abs(pos_f_lin - flux_lin),
+                    "neg_flux_err": abs(flux_lin - neg_f_lin)
+                })
+            new_df = pd.DataFrame(new_rows)
+            combined_df = pd.concat([combined_df, new_df], ignore_index=True)
+            # combined_df.to_csv(f"{folder_path}/CSV_data/{grb_name}.csv", index=False) # Disabled for Streamlit
+            # print(f"Saved combined CSV to: {folder_path}/CSV_data/{grb_name}.csv")
+            
+            st.success(f"Reconstruction Complete for {grb_name}")
+            csv_buffer = combined_df.to_csv(index=False).encode('utf-8')
+            st.download_button(label="Download Combined CSV", data=csv_buffer, file_name=f"{grb_name}_spline.csv", mime="text/csv")
+
+    train_spline()
 
 else:
     st.info("Select a GRB and model from the sidebar, then click 'Fetch & Reconstruct' to begin analysis.")
