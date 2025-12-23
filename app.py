@@ -805,7 +805,7 @@ elif run_paper_btn:
             X_train = train_x_denorm.reshape(-1, 1, 1)
             y_train = train_y_denorm.reshape(-1, 1, 1)
             
-            history = model.fit(X_train, y_train, epochs=1000, verbose=0, batch_size=64)
+            history = model.fit(X_train, y_train, epochs=500, verbose=0, batch_size=128)
             
             # Predictions
             x_test = test_x_denorm.reshape(-1, 1, 1)
