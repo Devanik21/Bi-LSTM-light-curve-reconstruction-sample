@@ -283,7 +283,7 @@ paper_model_select = st.sidebar.selectbox("Select Paper Model",
 run_paper_btn = False
 if paper_model_select == "Model 1: Quadratic Smoothing Spline (GRB 231210B)":
     dataset_url = st.sidebar.text_input("Dataset URL (GitHub Raw)", 
-        value="https://raw.githubusercontent.com/username/repo/main/GRB%20Data/GRB231210B_trimmed.csv")
+        value="https://raw.githubusercontent.com/Devanik21/Bi-LSTM-light-curve-reconstruction-sample/refs/heads/main/GRB%20Data/GRB231210B_trimmed.csv")
     run_paper_btn = st.sidebar.button("Run Paper Model 1", type="primary")
 
 st.sidebar.markdown("---")
