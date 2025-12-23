@@ -648,7 +648,7 @@ if run_btn:
             )
 
 elif run_paper_btn:
-    st.subheader("Paper Model 1: Quadratic Smoothing Spline on GRB 231210B")
+    st.subheader("Paper Model 1: Attention U-Net on GRB 231210B")
     
     def AttentionBlock1D(x, g, inter_channels):
         """Attention mechanism for U-Net"""
