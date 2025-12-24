@@ -654,7 +654,7 @@ if run_btn:
                 use_container_width=True
             )
 
-elif run_paper_btn:
+elif run_paper_btn and paper_model_select == "Model 1: Attention U-Net (GRB 231210B)":
     st.subheader("Paper Model 1: Attention U-Net on GRB 231210B")
     
     def AttentionBlock1D(x, g, inter_channels):
