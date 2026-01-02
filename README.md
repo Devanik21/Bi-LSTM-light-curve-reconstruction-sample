@@ -403,4 +403,4 @@ copies of the Software.
 ---
 
 **Made with passion for astrophysics and machine learning**  
-*"Understanding the most powerful explosions in the universe, one light curve at a time"*
+*"Understanding the most powerful explosions in the universe"*
