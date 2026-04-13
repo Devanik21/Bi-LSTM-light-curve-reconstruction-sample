@@ -18,7 +18,7 @@ from scipy.interpolate import UnivariateSpline
 import os
 
 # --- CONFIGURATION & SEEDS ---
-st.set_page_config(page_title="Multi-Model GRB Reconstructor", layout="wide")
+st.set_page_config(page_title="Multi-Model GRB Reconstructor", layout="wide",page_icon='♾️')
 seed_value = 42
 np.random.seed(seed_value)
 tf.random.set_seed(seed_value)
